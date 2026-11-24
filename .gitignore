@@ -1,0 +1,16 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Packaged builds and exported profiles (exports contain your personal info and resume)
+*.zip
+*.crx
+*.pem
+job-autofill-profile*.json
+job-autofill-profiles*.json
+
+# Node (if you add tooling later)
+node_modules/

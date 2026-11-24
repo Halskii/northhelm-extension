@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Job Autofill — Profile</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <img src="../icons/icon48.png" width="32" height="32" alt="">
+      <div>
+        <h1>Job Autofill</h1>
+        <p>Everything here stays in Chrome on this computer. Changes save automatically.</p>
+      </div>
+      <span id="saved" class="saved" aria-live="polite"></span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card profile-bar">
+      <div class="pb-row">
+        <label class="pb-pick">Profile
+          <select id="profile-select"></select>
+        </label>
+        <span class="spacer"></span>
+        <button id="p-new">+ New profile</button>
+        <button id="p-rename">Rename</button>
+        <button id="p-delete" class="danger">Delete</button>
+      </div>
+      <p class="note" id="pb-note">Want different versions, like one for tech jobs and one for other jobs? Click <b>New profile</b> and copy this one, then swap in a different resume.</p>
+      <div id="new-banner" class="banner" hidden></div>
+    </section>
+
+    <nav class="toc">
+      <a href="#personal">Personal</a><a href="#address">Address</a><a href="#links">Links</a>
+      <a href="#prefs">Job details</a><a href="#elig">Eligibility</a><a href="#work">Work history</a>
+      <a href="#edu">Education</a><a href="#docs">Resume &amp; text</a><a href="#custom">Custom answers</a>
+      <a href="#eeo">Self-ID</a><a href="#settings">Settings</a>
+    </nav>
+
+    <section id="personal" class="card">
+      <h2>Personal</h2>
+      <div class="grid">
+        <label>First name<input data-key="firstName" autocomplete="off"></label>
+        <label>Middle name<input data-key="middleName"></label>
+        <label>Last name<input data-key="lastName"></label>
+        <label>Preferred name<input data-key="preferredName"></label>
+        <label>Pronouns<input data-key="pronouns" placeholder="optional"></label>
+        <label>Email<input data-key="email" type="email"></label>
+        <label>Phone<input data-key="phone" type="tel" placeholder="(512) 555-0123"></label>
+        <label>Phone country code<input data-key="phoneCountryCode" placeholder="+1"></label>
+        <label>Phone type
+          <select data-key="phoneType"><option>Mobile</option><option>Home</option><option>Work</option></select>
+        </label>
+      </div>
+    </section>
+
+    <section id="address" class="card">
+      <h2>Address</h2>
+      <div class="grid">
+        <label class="span2">Street address<input data-key="address1"></label>
+        <label>Apt / suite<input data-key="address2"></label>
+        <label>City<input data-key="city"></label>
+        <label>State<input data-key="state" placeholder="TX or Texas"></label>
+        <label>ZIP<input data-key="zip"></label>
+        <label>County<input data-key="county" placeholder="optional"></label>
+        <label>Country<input data-key="country" placeholder="United States"></label>
+        <label>"Location" answer<input data-key="location" placeholder="Leave blank to use City, State"></label>
+      </div>
+    </section>
+
+    <section id="links" class="card">
+      <h2>Links</h2>
+      <div class="grid">
+        <label>LinkedIn<input data-key="linkedin" type="url" placeholder="https://linkedin.com/in/…"></label>
+        <label>GitHub<input data-key="github" type="url"></label>
+        <label>Portfolio<input data-key="portfolio" type="url"></label>
+        <label>Personal website<input data-key="website" type="url"></label>
+        <label>Twitter / X<input data-key="twitter" type="url"></label>
+      </div>
+    </section>
+
+    <section id="prefs" class="card">
+      <h2>Job details</h2>
+      <div class="grid">
+        <label>Current / most recent company<input data-key="currentCompany" placeholder="Blank = first job in work history"></label>
+        <label>Current / most recent title<input data-key="currentTitle" placeholder="Blank = first job in work history"></label>
+        <label>Years of experience<input data-key="yearsExperience" placeholder="e.g. 3"></label>
+        <label>Salary expectation<input data-key="salary" placeholder="e.g. 85000"></label>
+        <label>Available start date<input data-key="startDate" placeholder="e.g. Immediately or 2 weeks"></label>
+        <label>Notice period<input data-key="noticePeriod" placeholder="e.g. 2 weeks"></label>
+        <label>"How did you hear about us?"<input data-key="howHeard" placeholder="e.g. LinkedIn"></label>
+        <label class="span2">Skills<input data-key="skills" placeholder="Python, SQL, risk analysis, …"></label>
+      </div>
+    </section>
+
+    <section id="elig" class="card">
+      <h2>Eligibility</h2>
+      <p class="note">Leave any of these blank and the extension will outline the question so you answer it yourself.</p>
+      <div class="grid">
+        <label>Legally authorized to work in the US?<select data-key="workAuthorized"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Will you need visa sponsorship?<select data-key="sponsorship"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>18 or older?<select data-key="over18"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Willing to relocate?<select data-key="relocate"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Previously worked for the company?<select data-key="previouslyEmployed"><option value=""></option><option>Yes</option><option>No</option></select></label>
+      </div>
+    </section>
+
+    <section id="work" class="card">
+      <h2>Work history <small>most recent first</small></h2>
+      <div id="work-list" class="list"></div>
+      <button class="add" data-add="workHistory">+ Add job</button>
+    </section>
+
+    <section id="edu" class="card">
+      <h2>Education</h2>
+      <div id="edu-list" class="list"></div>
+      <button class="add" data-add="education">+ Add school</button>
+    </section>
+
+    <section id="docs" class="card">
+      <h2>Resume &amp; text</h2>
+      <div class="grid">
+        <div class="file">
+          <span class="flabel">Resume for this profile (PDF or Word)</span>
+          <div class="frow"><input type="file" id="resume-input" accept=".pdf,.doc,.docx,.txt,.rtf"><span id="resume-name" class="fname">None uploaded</span><button class="link" id="resume-clear" hidden>Remove</button></div>
+        </div>
+        <div class="file">
+          <span class="flabel">Cover letter file (optional)</span>
+          <div class="frow"><input type="file" id="cover-input" accept=".pdf,.doc,.docx,.txt,.rtf"><span id="cover-name" class="fname">None uploaded</span><button class="link" id="cover-clear" hidden>Remove</button></div>
+        </div>
+        <label class="span3">Short professional summary<textarea data-key="summary" rows="3"></textarea></label>
+        <label class="span3">Cover letter text (pasted into "cover letter" or "why us" boxes)<textarea data-key="coverLetterText" rows="6"></textarea></label>
+      </div>
+    </section>
+
+    <section id="custom" class="card">
+      <h2>Custom answers</h2>
+      <p class="note">If a question contains the text on the left, use the answer on the right. These are checked before everything else. Wrap in slashes for a regex, e.g. <code>/clearance|security clearance/</code>.</p>
+      <div id="custom-list" class="list compact"></div>
+      <button class="add" data-add="customAnswers">+ Add answer</button>
+    </section>
+
+    <section id="eeo" class="card">
+      <h2>Voluntary self-identification</h2>
+      <label class="check"><input type="checkbox" data-setting="fillEeo"> Fill these questions automatically (off = they're left for you)</label>
+      <div class="grid">
+        <label>Gender<input data-key="eeo.gender" placeholder="e.g. Male, or Decline to self-identify"></label>
+        <label>Hispanic or Latino?<input data-key="eeo.hispanic" placeholder="Yes / No / Decline"></label>
+        <label>Race / ethnicity<input data-key="eeo.race" placeholder="e.g. White, or Decline to self-identify"></label>
+        <label>Veteran status<input data-key="eeo.veteran" placeholder="e.g. I am not a protected veteran"></label>
+        <label>Disability status<input data-key="eeo.disability" placeholder="e.g. No, I do not have a disability"></label>
+      </div>
+    </section>
+
+    <section id="settings" class="card">
+      <h2>Settings</h2>
+      <label class="check"><input type="checkbox" data-setting="overwrite"> Overwrite fields that already have text</label>
+      <label class="check"><input type="checkbox" data-setting="highlight"> Outline filled fields (green) and questions that need you (orange)</label>
+      <label class="check"><input type="checkbox" data-setting="workdayAddEntries"> On Workday, click "Add" to create enough work-history and education blocks</label>
+      <div class="row-btns">
+        <button id="export">Export all profiles</button>
+        <label class="btn">Import profiles<input type="file" id="import" accept=".json" hidden></label>
+        <button id="shortcuts">Change keyboard shortcut</button>
+        <button id="reset" class="danger">Clear everything</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="dlg">
+    <form method="dialog" id="dlg-form">
+      <h3 id="dlg-title">New profile</h3>
+      <label>Name<input id="dlg-name" required maxlength="60" placeholder="e.g. Tech jobs"></label>
+      <div id="dlg-new-opts">
+        <label class="check"><input type="radio" name="start" value="copy" checked> Copy all info from
+          <select id="dlg-src"></select></label>
+        <label class="check sub"><input type="checkbox" id="dlg-files"> Also copy the resume and cover letter files</label>
+        <label class="check"><input type="radio" name="start" value="blank"> Start blank</label>
+      </div>
+      <p id="dlg-msg" class="note"></p>
+      <div class="dlg-btns">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="ok" id="dlg-ok" class="primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <template id="tpl-workHistory">
+    <div class="item">
+      <div class="item-head"><b class="item-title">Job</b><span class="spacer"></span><button class="link" data-up>↑</button><button class="link danger" data-remove>Remove</button></div>
+      <div class="grid">
+        <label>Company<input data-f="company"></label>
+        <label>Title<input data-f="title"></label>
+        <label>Location<input data-f="location" placeholder="City, ST"></label>
+        <label>Start<input data-f="start" type="month"></label>
+        <label>End<input data-f="end" type="month"></label>
+        <label class="check inline"><input type="checkbox" data-f="current"> I currently work here</label>
+        <label class="span3">Description<textarea data-f="description" rows="3"></textarea></label>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-education">
+    <div class="item">
+      <div class="item-head"><b class="item-title">School</b><span class="spacer"></span><button class="link" data-up>↑</button><button class="link danger" data-remove>Remove</button></div>
+      <div class="grid">
+        <label>School<input data-f="school"></label>
+        <label>Degree<input data-f="degree" placeholder="Bachelor of Science"></label>
+        <label>Major / field of study<input data-f="major"></label>
+        <label>GPA<input data-f="gpa"></label>
+        <label>Start<input data-f="start" type="month"></label>
+        <label>End / graduation<input data-f="end" type="month"></label>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-customAnswers">
+    <div class="item row">
+      <input data-f="match" placeholder="Question contains… e.g. security clearance">
+      <input data-f="answer" placeholder="Answer… e.g. No">
+      <button class="link danger" data-remove>✕</button>
+    </div>
+  </template>
+
+  <script src="../lib/store.js"></script>
+  <script src="defaults.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
