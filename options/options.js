@@ -64,6 +64,7 @@ async function switchTo(id) {
   await renderProfileBar();
   await refreshFiles();
   $("#new-banner").hidden = true;
+  document.dispatchEvent(new CustomEvent("jaf-profile-switched"));
 }
 
 $("#profile-select").addEventListener("change", (e) => switchTo(e.target.value));
@@ -312,6 +313,17 @@ $("#reset").addEventListener("click", async () => {
 });
 
 $("#shortcuts").addEventListener("click", () => chrome.tabs.create({ url: "chrome://extensions/shortcuts" }));
+
+// Enter in the contact form shouldn't reload the page.
+$("#contact-form").addEventListener("submit", (e) => e.preventDefault());
+
+// Hooks for resume-ai.js (the AI resume reader).
+window.JAF_OPTIONS = {
+  getProfile: () => profile,
+  getProfileId: () => currentId,
+  getProfileName: () => nameOf(currentId),
+  async applied() { fillForm(); await saveNow(); flashSaved("Profile updated from resume"); }
+};
 
 // ---------- init ----------
 (async function init() {

@@ -62,3 +62,20 @@ button.primary.danger-fill { background: var(--danger); border-color: var(--dang
 #make-active { margin-bottom: 4px; }
 code { background: #eef1f5; padding: 0 4px; border-radius: 4px; }
 @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .span2, .span3 { grid-column: span 1; } }
+
+.tip { margin: -4px 0 12px; background: #f3f7fc; border-radius: 8px; padding: 6px 10px; }
+.ai-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.ai-row button:disabled { opacity: .5; cursor: not-allowed; }
+.ai-status { font-size: 13px; color: var(--muted); }
+.ai-status.err { color: var(--danger); }
+.ai-status.ok { color: #1e7d4f; }
+.ai-config { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
+.howto { font-size: 13px; margin-bottom: 8px; }
+.howto summary { cursor: pointer; color: var(--navy); font-weight: 600; }
+dialog.wide { width: 620px; max-height: 85vh; }
+.ai-sec { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.ai-sec > label.check { margin: 0 0 4px; font-weight: 600; }
+.ai-sec ul { margin: 4px 0 0 26px; padding: 0; font-size: 13px; color: var(--ink); }
+.ai-sec li { margin: 2px 0; }
+.ai-sec .muted { color: var(--muted); }
+.small { font-size: 12px; }

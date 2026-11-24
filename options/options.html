@@ -36,19 +36,21 @@
       <a href="#personal">Personal</a><a href="#address">Address</a><a href="#links">Links</a>
       <a href="#prefs">Job details</a><a href="#elig">Eligibility</a><a href="#work">Work history</a>
       <a href="#edu">Education</a><a href="#docs">Resume &amp; text</a><a href="#custom">Custom answers</a>
-      <a href="#eeo">Self-ID</a><a href="#settings">Settings</a>
+      <a href="#eeo">Self-ID</a><a href="#ai">AI reader</a><a href="#settings">Settings</a>
     </nav>
 
+    <form id="contact-form" autocomplete="on">
     <section id="personal" class="card">
       <h2>Personal</h2>
+      <p class="note tip">Tip: click <b>First name</b> or <b>Street address</b> and pick your saved info from Chrome's dropdown to fill your name, email, phone and address at once. Or use <a href="#docs">Fill profile from resume</a>.</p>
       <div class="grid">
-        <label>First name<input data-key="firstName" autocomplete="off"></label>
-        <label>Middle name<input data-key="middleName"></label>
-        <label>Last name<input data-key="lastName"></label>
+        <label>First name<input data-key="firstName" name="given-name" autocomplete="given-name"></label>
+        <label>Middle name<input data-key="middleName" name="additional-name" autocomplete="additional-name"></label>
+        <label>Last name<input data-key="lastName" name="family-name" autocomplete="family-name"></label>
         <label>Preferred name<input data-key="preferredName"></label>
         <label>Pronouns<input data-key="pronouns" placeholder="optional"></label>
-        <label>Email<input data-key="email" type="email"></label>
-        <label>Phone<input data-key="phone" type="tel" placeholder="(512) 555-0123"></label>
+        <label>Email<input data-key="email" name="email" type="email" autocomplete="email"></label>
+        <label>Phone<input data-key="phone" name="tel" type="tel" autocomplete="tel" placeholder="(512) 555-0123"></label>
         <label>Phone country code<input data-key="phoneCountryCode" placeholder="+1"></label>
         <label>Phone type
           <select data-key="phoneType"><option>Mobile</option><option>Home</option><option>Work</option></select>
@@ -59,16 +61,17 @@
     <section id="address" class="card">
       <h2>Address</h2>
       <div class="grid">
-        <label class="span2">Street address<input data-key="address1"></label>
-        <label>Apt / suite<input data-key="address2"></label>
-        <label>City<input data-key="city"></label>
-        <label>State<input data-key="state" placeholder="TX or Texas"></label>
-        <label>ZIP<input data-key="zip"></label>
+        <label class="span2">Street address<input data-key="address1" name="address-line1" autocomplete="address-line1"></label>
+        <label>Apt / suite<input data-key="address2" name="address-line2" autocomplete="address-line2"></label>
+        <label>City<input data-key="city" name="address-level2" autocomplete="address-level2"></label>
+        <label>State<input data-key="state" name="address-level1" autocomplete="address-level1" placeholder="TX or Texas"></label>
+        <label>ZIP<input data-key="zip" name="postal-code" autocomplete="postal-code"></label>
         <label>County<input data-key="county" placeholder="optional"></label>
-        <label>Country<input data-key="country" placeholder="United States"></label>
+        <label>Country<input data-key="country" name="country-name" autocomplete="country-name" placeholder="United States"></label>
         <label>"Location" answer<input data-key="location" placeholder="Leave blank to use City, State"></label>
       </div>
     </section>
+    </form>
 
     <section id="links" class="card">
       <h2>Links</h2>
@@ -125,6 +128,10 @@
         <div class="file">
           <span class="flabel">Resume for this profile (PDF or Word)</span>
           <div class="frow"><input type="file" id="resume-input" accept=".pdf,.doc,.docx,.txt,.rtf"><span id="resume-name" class="fname">None uploaded</span><button class="link" id="resume-clear" hidden>Remove</button></div>
+          <div class="ai-row">
+            <button id="ai-fill" class="primary" disabled>✨ Fill profile from resume</button>
+            <span id="ai-status" class="ai-status"></span>
+          </div>
         </div>
         <div class="file">
           <span class="flabel">Cover letter file (optional)</span>
@@ -152,6 +159,25 @@
         <label>Veteran status<input data-key="eeo.veteran" placeholder="e.g. I am not a protected veteran"></label>
         <label>Disability status<input data-key="eeo.disability" placeholder="e.g. No, I do not have a disability"></label>
       </div>
+    </section>
+
+    <section id="ai" class="card">
+      <h2>AI resume reader</h2>
+      <p class="note">Reads your resume with Claude Haiku and fills in this profile. You review the results before anything changes. Your resume text is sent to Anthropic's API using your own API key.</p>
+      <div class="ai-config">
+        <div><b>API key:</b> <span id="ai-key-status">checking…</span></div>
+        <div><b>Model:</b> <code id="ai-model">claude-haiku-5-5</code></div>
+      </div>
+      <details class="howto">
+        <summary>How to add your API key</summary>
+        <ol>
+          <li>In the extension's folder (the one with <code>manifest.json</code>), copy <code>.env.example</code> to a new file named <code>.env</code>.</li>
+          <li>Put your key in it: <code>ANTHROPIC_API_KEY=sk-ant-…</code></li>
+          <li>At <code>chrome://extensions</code>, click the reload icon on Job Autofill, then reopen this page.</li>
+        </ol>
+        <p class="note"><code>.env</code> is git-ignored and only this extension can read it. Web pages can't.</p>
+      </details>
+      <div class="row-btns"><button id="ai-test">Test connection</button><span id="ai-test-result" class="ai-status"></span></div>
     </section>
 
     <section id="settings" class="card">
@@ -182,6 +208,19 @@
       <div class="dlg-btns">
         <button value="cancel" formnovalidate>Cancel</button>
         <button value="ok" id="dlg-ok" class="primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ai-dlg" class="wide">
+    <form method="dialog">
+      <h3>Found in your resume</h3>
+      <p class="note">Tick what to copy into <b id="ai-dlg-profile"></b>. Unticked sections stay as they are.</p>
+      <div id="ai-sections"></div>
+      <p class="note small">Dates that only had a year were set to January. Check them in Work history.</p>
+      <div class="dlg-btns">
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="primary">Apply to profile</button>
       </div>
     </form>
   </dialog>
@@ -226,5 +265,6 @@
   <script src="../lib/store.js"></script>
   <script src="defaults.js"></script>
   <script src="options.js"></script>
+  <script type="module" src="resume-ai.js"></script>
 </body>
 </html>

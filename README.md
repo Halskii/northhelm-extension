@@ -25,6 +25,17 @@ You start with one profile. To add another, such as one for non-tech jobs, click
 
 When you have more than one profile, the popup shows a **Fill as** dropdown, and right-clicking a page shows **Fill job application → your profile names**. The keyboard shortcut uses whichever profile you picked last. **Export** saves all profiles and their files to one file, and **Import** adds them alongside the profiles you already have.
 
+## Fill your profile faster
+- **From Chrome's saved info:** on the profile page, click **First name** or **Street address**. Chrome shows its autofill dropdown with your saved addresses. Pick one to fill your name, email, phone and address at once. Manage the saved entries at `chrome://settings/addresses`.
+- **From your resume (AI):** upload a resume (PDF, .docx, .txt or .rtf), then click **✨ Fill profile from resume**. The resume's text is extracted in the browser and sent to Claude Haiku. You then see what was found and tick which sections to apply: name and contact, links, work history, education, and summary/skills. Your GPA is kept if the resume doesn't list one.
+
+### Setting up the AI resume reader
+1. Copy `.env.example` to `.env` in this folder.
+2. Set `ANTHROPIC_API_KEY=sk-ant-...`. You can optionally set `ANTHROPIC_MODEL`; the default is `claude-haiku-5-5`.
+3. Reload the extension at `chrome://extensions`. On the profile page, the **AI resume reader** section shows whether the key was found, and **Test connection** checks it.
+
+`.env` is git-ignored. The extension reads it from its own folder, and web pages can't. Each read costs a small amount of API usage on your Anthropic account. Your resume text goes to Anthropic; nothing else leaves your computer.
+
 ## Custom answers
 Under **Custom answers** on the profile page you can add rules like `security clearance → No` or `/willing to travel|travel required/ → Yes`. If a question contains the text on the left, the answer on the right is used. These rules are checked before anything else, so use them to teach the extension a site's odd questions.
 
@@ -35,13 +46,15 @@ Under **Custom answers** on the profile page you can add rules like `security cl
 - Submitting the application.
 
 ## Privacy
-Everything is stored in `chrome.storage.local` on your computer. The extension makes no network requests.
+Everything is stored in `chrome.storage.local` on your computer. The only network request the extension makes is the optional AI resume read, which sends your resume text to Anthropic's API when you click the button.
 
 ## Files
 - `manifest.json`: extension config (Manifest V3).
 - `background.js`: shortcut, right-click menu, and sending the fill command to every frame (iCIMS and Taleo forms live in iframes).
 - `content/matchers.js`: question-to-profile rules and dropdown option matching (states, countries, degrees, yes/no and so on).
 - `content/adapters.js`: per-site selectors plus Workday's "Add entry" step.
+- `lib/resume-text.js`: gets text out of PDF, DOCX, TXT and RTF resumes. PDFs use pdf.js, in `lib/vendor`, Apache-2.0.
+- `options/resume-ai.js`: the AI resume reader (Claude call, review dialog, applying the results).
 - `lib/store.js`: profile storage, shared by every part of the extension.
 - `content/filler.js`: the engine. It finds fields (including inside shadow DOM), reads labels, detects the work-history and education sections, and sets values in a way React and Workday accept.
 - `options/`: profile page.
