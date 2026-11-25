@@ -19,3 +19,4 @@ job-autofill-profiles*.json
 
 # Node (if you add tooling later)
 node_modules/
+/Claude outputs

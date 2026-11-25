@@ -406,6 +406,27 @@
       if (hit) return hit.i;
     }
 
+    // Field of study: a shared generic word ("Science", "Engineering") is not a match.
+    // Take only an option that has every word of the wanted major, with the fewest
+    // extra words ("Computer Science" -> "Computer and Information Science", never
+    // "Actuarial Science"). Nothing qualifies -> no pick; a blank beats a wrong major.
+    if (key === "edu.major") {
+      const STOP = new Set(["and", "of", "the", "in", "for", "with"]);
+      const words = (t) => norm(t).split(" ").filter(w => w.length > 1 && !STOP.has(w)).map(sing);
+      let pick = -1, fewest = Infinity;
+      for (const a of alts) {
+        const want = words(a);
+        if (!want.length) continue;
+        for (const o of opts) {
+          const have = words(o.t);
+          if (!want.every(w => have.includes(w))) continue;
+          const extra = have.length - want.length;
+          if (extra < fewest) { fewest = extra; pick = o.i; }
+        }
+      }
+      return pick;
+    }
+
     // Starts-with / contains
     for (const a of alts) {
       if (a.length < 2) continue;
