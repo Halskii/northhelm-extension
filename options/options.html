@@ -17,6 +17,11 @@
     </div>
   </header>
 
+  <div id="err-banner" class="err-banner" role="alert" hidden>
+    <div class="wrap"><b>Something went wrong:</b> <span id="err-text"></span>
+      <button class="link" id="err-close" type="button">Dismiss</button></div>
+  </div>
+
   <main class="wrap">
     <section class="card profile-bar">
       <div class="pb-row">
@@ -107,6 +112,17 @@
         <label>18 or older?<select data-key="over18"><option value=""></option><option>Yes</option><option>No</option></select></label>
         <label>Willing to relocate?<select data-key="relocate"><option value=""></option><option>Yes</option><option>No</option></select></label>
         <label>Previously worked for the company?<select data-key="previouslyEmployed"><option value=""></option><option>Yes</option><option>No</option></select></label>
+      </div>
+      <h3>Common screening questions</h3>
+      <p class="note">Employers word these differently, so check each one after filling. Blank ones are left for you to answer.</p>
+      <div class="grid">
+        <label>Hold FINRA registrations or insurance licenses?<select data-key="finraLicenses"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>A relative or partner works at the company?<select data-key="relativeAtCompany"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Worked for the company before as a contractor or temp?<select data-key="priorContractor"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Bound by a non-compete, non-solicit or similar agreement?<select data-key="restrictiveAgreement"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Ever involuntarily discharged or asked to resign?<select data-key="involuntaryTermination"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Plan to hold an outside position or other employment?<select data-key="outsideEmployment"><option value=""></option><option>Yes</option><option>No</option></select></label>
+        <label>Ever a public official or government employee?<select data-key="governmentEmployee"><option value=""></option><option>Yes</option><option>No</option></select></label>
       </div>
     </section>
 
@@ -206,8 +222,8 @@
       </div>
       <p id="dlg-msg" class="note"></p>
       <div class="dlg-btns">
-        <button value="cancel" formnovalidate>Cancel</button>
-        <button value="ok" id="dlg-ok" class="primary">Create</button>
+        <button type="button" class="dlg-cancel">Cancel</button>
+        <button type="submit" value="ok" id="dlg-ok" class="primary">Create</button>
       </div>
     </form>
   </dialog>
@@ -219,8 +235,8 @@
       <div id="ai-sections"></div>
       <p class="note small">Dates that only had a year were set to January. Check them in Work history.</p>
       <div class="dlg-btns">
-        <button value="cancel">Cancel</button>
-        <button value="ok" class="primary">Apply to profile</button>
+        <button type="button" class="dlg-cancel">Cancel</button>
+        <button type="submit" value="ok" class="primary">Apply to profile</button>
       </div>
     </form>
   </dialog>

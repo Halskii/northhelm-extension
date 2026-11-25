@@ -58,6 +58,8 @@ dialog label.sub { margin-left: 24px; font-size: 13px; color: var(--muted); }
 button.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
 button.primary:hover { background: var(--navy-dark); }
 button.primary.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff !important; }
+.err-banner { background: #fbeceb; border-bottom: 1px solid #ecc9c4; color: #8c2a20; padding: 8px 0; font-size: 13px; position: sticky; top: 68px; z-index: 4; }
+.err-banner .link { color: #8c2a20; text-decoration: underline; margin-left: 8px; }
 .badge { background: #e3f1ea; color: #1e7d4f; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
 #make-active { margin-bottom: 4px; }
 code { background: #eef1f5; padding: 0 4px; border-radius: 4px; }

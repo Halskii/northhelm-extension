@@ -2,7 +2,8 @@
 // form; adapters add exact field hints and site-specific steps (e.g. Workday's
 // "Add" buttons for work history). Exposes window.__JAF_ADAPTERS.
 (() => {
-  if (window.__JAF_ADAPTERS) return;
+  const VER = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "dev"; } })();
+  if (window.__JAF_ADAPTERS && window.__JAF_ADAPTERS.version === VER) return;
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
@@ -43,6 +44,7 @@
         ['[data-automation-id="gpa"], [id*="education-"][id$="--gradeAverage"]', "edu.gpa"],
         ['[data-automation-id="formField-firstYearAttended"] input, [id*="education-"][id*="--firstYearAttended-"]', "edu.start"],
         ['[data-automation-id="formField-lastYearAttended"] input, [id*="education-"][id*="--lastYearAttended-"]', "edu.end"],
+        ['[data-automation-id="formField-skills"] input, [id$="skills--skills"], [id*="skills"][data-automation-id="searchBox"]', "skills"],
         ['[data-automation-id="linkedinQuestion"], [id*="socialNetworkAccounts--linkedInAccount"]', "linkedin"],
         ['[data-automation-id="file-upload-input-ref"], input[type="file"][data-automation-id*="file"]', "resumeFile"]
       ],
@@ -141,5 +143,5 @@
     return GENERIC;
   }
 
-  window.__JAF_ADAPTERS = { ADAPTERS, detect };
+  window.__JAF_ADAPTERS = { version: VER, ADAPTERS, detect };
 })();

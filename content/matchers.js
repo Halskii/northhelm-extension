@@ -1,7 +1,8 @@
 // Job Autofill — field matching rules and option-matching helpers.
 // Loaded before adapters.js and filler.js; exposes window.__JAF_M.
 (() => {
-  if (window.__JAF_M) return;
+  const VER = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "dev"; } })();
+  if (window.__JAF_M && window.__JAF_M.version === VER) return;
 
   const norm = (s) => String(s ?? "")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -24,7 +25,7 @@
 
   const RULES = [
     // Never-touch fields — matched first so nothing else claims them.
-    R("__skip", "any", /captcha|password|social security|\bssn\b|date of birth|birth ?date|\bdob\b|signature|initials|e-?sign|today'?s date|date signed|security question|bank|routing|credit card/, /captcha|password|ssn|birth|signature|honeypot/),
+    R("__skip", "any", /captcha|password|social security|\bssn\b|date of birth|birth ?date|\bdob\b|signature|\binitials\b|\be-?sign\b|today'?s date|date signed|security question|bank(ing)? (account|details|information|name)|account number|routing|credit card/, /captcha|password|ssn|birth|signature|honeypot/),
     R("__consent", "any", /\b(i agree|agree to|i acknowledge|acknowledge|i certify|certify that|i consent|consent to|terms|privacy (policy|notice)|i have read|i understand|attest|subscribe|marketing|text messages|sms|opt in|newsletter|talent community|job alerts)\b/),
 
     // EEO / voluntary self-identification (only filled when enabled in options)
@@ -39,6 +40,13 @@
     R("workAuthorized", "any", /(legally )?(authori[sz]ed|eligible|permitted|right) to (work|be employed)|work authori[sz]ation|employment eligibility|eligible for employment|work permit/, /workauth|authorized|eligib/),
     R("over18", "any", /\b(18|eighteen) (years|or older|\+)|at least (18|eighteen)|legal (working )?age|of legal age/),
     R("relocate", "any", /relocat/),
+    R("finraLicenses", "any", /finra|securities licen[cs]e|series (6|7|24|63|65|66)\b|insurance licen[cs]es? and or designation/),
+    R("relativeAtCompany", "any", /(relative|family member|significant other|spouse|related to (any|an|a) )[^?]{0,80}(work|employ|director|officer)|(work|employ)[^?]{0,60}(relative|family member)/),
+    R("priorContractor", "any", /(as|been) an? (independent )?contractor|independent contractor or|temporary worker|contingent worker/),
+    R("restrictiveAgreement", "any", /non ?-?compet|non ?-?solicit|restrictive covenant|obligated under any (contract|agreement)|(bound by|subject to|party to) (any|an|a) [^?]{0,40}agreement/),
+    R("involuntaryTermination", "any", /involuntarily (discharged|terminated|separated)|asked to resign|(ever )?been (fired|terminated|discharged|dismissed)/),
+    R("outsideEmployment", "any", /outside (entity|employment|business|activit|position|affiliation)|secondary employment|serv(e|ing) on (the|a) board|other (form of )?employment while/),
+    R("governmentEmployee", "any", /public official|government(al)? (body|agency|official|entity|employee)|elected (position|official|office)|(employed|worked) (by|for) (a |the |any )?(federal|state|local)? ?government/),
     R("previouslyEmployed", "any", /(previously|ever|have you (ever )?)\s*(been )?(employed|worked) (by|for|at|with)|former employee|worked (here|for us) before|current or former employee/),
     R("howHeard", "any", /how did you (hear|find|learn|come across)|where did you (hear|find|learn)|how were you referred|source of (application|referral)|^source$|referral source|how you heard/, /^source|source source|sourcedropdown|howdidyouhear|hear about/),
     R("salary", "any", /salary|compensation|pay (expectation|requirement|range)|desired (pay|wage|rate)|expected (pay|wage|rate)|wage expectation/, /salary|compensation/),
@@ -103,7 +111,7 @@
     // Long text
     R("coverLetterText", "any", /cover letter|letter of (interest|intent)|why (do you want|are you interested|would you like)|why .{0,30}(us|company|role|position|team)\b|what (interests|excites|attracts|draws) you|interest(s|ed)? you (about|in) (this|the|our)|why (this|our) (role|company|team|position)/, /cover ?letter/),
     R("summary", "any", /summary|about (yourself|you|me)|introduce yourself|tell us about|bio(graphy)?\b|profile summary|professional summary/, /summary|bio/),
-    R("skills", "any", /^skills|technical skills|key skills|list (your )?skills/, /skills/)
+    R("skills", "any", /^(type to add |add |list |your |key |technical |relevant |top )?skills?\b|skills? \(|^skills? /, /skills/)
   ];
 
   // Which kinds of form control each key may fill. Keys not listed accept any
@@ -111,6 +119,7 @@
   const LONG_KEYS = new Set(["coverLetterText", "summary", "skills", "job.description", "address1"]);
   const BOOL_KEYS = new Set(["job.current"]);
   function keyAllowsKind(key, kind) {
+    if (key === "skills") return kind === "text" || kind === "textarea" || kind === "combobox";
     if (BOOL_KEYS.has(key)) return kind === "checkbox";
     if (kind === "checkbox") return false;
     if (kind === "textarea") return LONG_KEYS.has(key);
@@ -166,6 +175,132 @@
     if (/\b(associate|associates|a ?a|a ?s|2 year|two year)\b/.test(n)) return "associate";
     if (/\b(high school|ged|secondary|diploma)\b/.test(n)) return "highschool";
     return null;
+  }
+
+  // Strict matching for list-picking where a wrong pick is worse than none (skills):
+  // exact, then "python" -> "python programming language", then whole-word containment.
+  // Never "java" -> "javascript".
+  function strictOption(texts, value) {
+    const v = norm(value);
+    if (!v) return -1;
+    const opts = texts.map((t, i) => ({ i, n: norm(t) })).filter(o => o.n && !isPlaceholderOpt(o.n));
+    const byLen = (a, b) => a.n.length - b.n.length;
+    const exact = opts.find(o => o.n === v);
+    if (exact) return exact.i;
+    const pre = opts.filter(o => o.n.startsWith(v + " ")).sort(byLen);
+    if (pre.length) return pre[0].i;
+    const re = new RegExp("(^| )" + v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "( |$)");
+    const maxWords = v.split(" ").length + 3;
+    const cont = opts.filter(o => re.test(o.n) && o.n.split(" ").length <= maxWords).sort(byLen);
+    return cont.length ? cont[0].i : -1;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Skill matching. Sites keep their own skill catalogue ("Java (Programming
+  // Language)", "Amazon Web Services", "Docker Container"), so a profile skill
+  // has to be mapped to the catalogue's name for the same thing, and never to a
+  // narrower product that merely contains the word ("AWS VPN", "Java EE").
+  // ---------------------------------------------------------------------------
+  const SKILL_SYNONYMS = [
+    ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud Platform", "Google Cloud"], ["Azure", "Microsoft Azure"],
+    ["K8s", "Kubernetes"], ["JS", "JavaScript"], ["TS", "TypeScript"],
+    ["CI/CD", "Continuous Integration and Continuous Delivery", "Continuous Integration", "Continuous Delivery"],
+    ["LLM", "Large Language Models", "Large Language Modeling", "LLMs"], ["MCP", "Model Context Protocol"],
+    ["ML", "Machine Learning"], ["AI", "Artificial Intelligence"], ["GenAI", "Generative AI", "Generative Artificial Intelligence", "Gen AI"],
+    ["NLP", "Natural Language Processing"], ["OOP", "Object Oriented Programming"],
+    ["Postgres", "PostgreSQL"], ["Mongo", "MongoDB"], ["Node", "Node.js", "NodeJS"], ["React", "React.js", "ReactJS"], ["Vue", "Vue.js", "VueJS"],
+    ["C#", "C Sharp"], [".NET", ".NET Framework", "Dot Net"],
+    ["Excel", "Microsoft Excel"], ["Word", "Microsoft Word"], ["PowerPoint", "Microsoft PowerPoint"], ["Outlook", "Microsoft Outlook"],
+    ["Office", "Microsoft Office"], ["SQL Server", "Microsoft SQL Server"], ["Power BI", "Microsoft Power BI"], ["Teams", "Microsoft Teams"],
+    ["Oracle", "Oracle Databases", "Oracle Database"], ["REST", "REST APIs", "RESTful API", "REST API"],
+    ["Agentic AI", "AI Agents"], ["PowerShell", "Windows PowerShell"], ["Terraform", "HashiCorp Terraform"], ["OpenShift", "Red Hat OpenShift"],
+    ["TDD", "Test Driven Development"], ["ETL", "Extract Transform Load"], ["UI", "User Interface"], ["UX", "User Experience"],
+    ["QA", "Quality Assurance"], ["SDLC", "Software Development Life Cycle"], ["IaC", "Infrastructure as Code"], ["Spring", "Spring Framework"]
+  ];
+  const SKILL_VENDORS = new Set(["microsoft", "amazon", "google", "apache", "red hat", "hashicorp", "oracle", "ibm", "adobe", "atlassian", "vmware", "cisco", "sap", "salesforce"]);
+  // Words that only say what kind of thing it is; "Docker Container" is still Docker.
+  const SKILL_DESCRIPTORS = new Set(["programming", "language", "languages", "scripting", "software", "container", "containers", "database", "databases",
+    "framework", "frameworks", "platform", "development", "tool", "tools", "technology", "technologies", "library", "pipeline", "pipelines", "operating", "system", "systems"]);
+  // Trailing words people add in a profile that the catalogue usually leaves out.
+  const SKILL_FILLER = new Set(["pipelines", "pipeline", "development", "programming", "application", "applications", "scripting", "tools", "framework", "language"]);
+  const QUAL_BONUS = [[/programming language|scripting language|query language|markup language/, 4], [/framework|library|package|software|platform|tool|system|database|service/, 3]];
+
+  const splitSkill = (raw) => {
+    const s = String(raw || "");
+    const quals = [...s.matchAll(/\(([^)]*)\)/g)].map(m => m[1].trim()).filter(Boolean);
+    return { raw: s.trim(), baseRaw: s.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim(), quals };
+  };
+  const sing = (n) => n.replace(/([a-z]{3,})s$/, "$1");
+  const sameSkill = (a, b) => a === b || sing(a) === sing(b);
+
+  /** Everything a profile skill may be called, with a trust weight, plus what to type into the search box. */
+  function skillPlan(skill) {
+    const q = splitSkill(skill);
+    const names = new Map();
+    const add = (text, w) => { const n = norm(text); if (n && (names.get(n) || 0) < w) names.set(n, w); };
+    const terms = [];
+    const term = (t) => { t = String(t || "").trim(); if (t && !terms.some(x => x.toLowerCase() === t.toLowerCase())) terms.push(t); };
+    const synonymsOf = (text) => {
+      const n = norm(text);
+      const g = SKILL_SYNONYMS.find(grp => grp.some(x => norm(x) === n));
+      return g ? g.filter(x => norm(x) !== n) : [];
+    };
+
+    add(q.raw, 1); add(q.baseRaw, 0.99);
+    // One- or two-letter names ("C", "R", "Go") search badly on their own.
+    if (norm(q.baseRaw).length <= 2) term(`${q.baseRaw} (Programming Language)`);
+    term(q.baseRaw);
+    const syn = synonymsOf(q.baseRaw);
+    syn.forEach(x => add(x, 0.97));
+    const longer = (list, than) => list.find(x => x.length > than.length);      // type the spelled-out name, not another abbreviation
+    term(longer(syn, q.baseRaw));
+    q.quals.forEach(x => { add(x, 0.85); term(x); synonymsOf(x).forEach(y => add(y, 0.85)); });
+
+    const words = q.baseRaw.split(/\s+/);
+    let cut = words.length;
+    while (cut > 1 && SKILL_FILLER.has(norm(words[cut - 1]))) cut--;
+    if (cut < words.length) {
+      const short = words.slice(0, cut).join(" ");
+      add(short, 0.92); term(short);
+      const s2 = synonymsOf(short);
+      s2.forEach(x => add(x, 0.9));
+      term(longer(s2, short));
+    }
+    const list = [...names].map(([n, w]) => ({ n, w }));
+    // If we know what an abbreviation stands for, "(MCP)" on some other phrase is not a match.
+    return { skill: q.raw, names: list, terms: terms.slice(0, 4), knowsLongForm: list.some(x => x.n.includes(" ")) };
+  }
+
+  /** 0–100: how sure we are that this catalogue entry is the same skill. 80+ is safe to pick. */
+  function skillScore(label, plan) {
+    const L = splitSkill(label);
+    const full = norm(L.raw), base = norm(L.baseRaw), quals = L.quals.map(norm);
+    if (!full || isPlaceholderOpt(full)) return 0;
+    let best = 0;
+    for (const { n, w } of plan.names) {
+      let tier = 0;
+      if (sameSkill(full, n)) tier = 100;
+      else if (quals.length && sameSkill(base, n)) {
+        const q = quals.join(" ");
+        tier = 95 + ((QUAL_BONUS.find(([re]) => re.test(q)) || [0, 0])[1]);
+      }
+      else if (!plan.knowsLongForm && quals.some(x => sameSkill(x, n))) tier = 93;
+      else {
+        for (const text of new Set([base, full])) {
+          if (text.endsWith(" " + n) && SKILL_VENDORS.has(text.slice(0, -n.length - 1))) tier = Math.max(tier, 88);
+          if (text.startsWith(n + " ") && text.slice(n.length + 1).split(" ").every(x => SKILL_DESCRIPTORS.has(x))) tier = Math.max(tier, 85);
+        }
+      }
+      best = Math.max(best, tier * w);
+    }
+    return Math.round(best);
+  }
+
+  /** Best catalogue entry for a skill: highest score, the site's own order breaking ties. */
+  function skillOption(labels, plan) {
+    let i = -1, score = 0;
+    labels.forEach((l, k) => { const s = skillScore(l, plan); if (s > score) { score = s; i = k; } });
+    return score >= 80 ? { i, score } : { i: -1, score };
   }
 
   function tokens(s) { return new Set(norm(s).split(" ").filter(t => t.length > 1)); }
@@ -320,5 +455,5 @@
     return `${mm}/${d.y}`;
   }
 
-  window.__JAF_M = { norm, RULES, keyAllowsKind, FILE_RULES, bestOption, yesNoOf, formatDate, splitDate, US_STATES, STATE_BY_NAME, MONTHS, isPlaceholderOpt };
+  window.__JAF_M = { version: VER, norm, RULES, keyAllowsKind, FILE_RULES, bestOption, strictOption, skillPlan, skillScore, skillOption, yesNoOf, formatDate, splitDate, US_STATES, STATE_BY_NAME, MONTHS, isPlaceholderOpt };
 })();

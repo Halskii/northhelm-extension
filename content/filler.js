@@ -2,7 +2,8 @@
 // roots), works out what each one asks for, and fills it from the saved profile
 // in a way React/Angular/Workday-style apps notice. Never clicks Submit/Next.
 (() => {
-  if (window.__jobAutofill) return;
+  const VER = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "dev"; } })();
+  if (window.__jobAutofill && window.__jobAutofill.version === VER) return;
   const M = window.__JAF_M;
   const AD = window.__JAF_ADAPTERS;
   const { norm } = M;
@@ -231,6 +232,14 @@
     return "";
   }
 
+  // Workday-style "type to search, then pick" inputs that don't carry a combobox role.
+  function isSearchPrompt(el) {
+    if (el.tagName !== "INPUT") return false;
+    if (el.closest('[data-automation-id="multiselectInputContainer"]')) return true;
+    const ff = el.closest('[data-automation-id^="formField"]');
+    return !!(ff && ff.querySelector('[data-automation-id="promptSearchButton"], [data-automation-id="promptIcon"], [data-automation-id="multiSelectContainer"]'));
+  }
+
   function collectFields() {
     const out = [];
     const raw = deepCollect(document.body, isControl);
@@ -273,7 +282,7 @@
       if (tag === "SELECT") kind = "select";
       else if (tag === "TEXTAREA") kind = "textarea";
       else if (tag === "BUTTON" || (el.getAttribute("role") === "combobox" && tag !== "INPUT")) kind = "listbox";
-      else if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list" || el.getAttribute("data-automation-id") === "searchBox" || /select__input|react-select/.test(el.id + " " + el.className)) kind = "combobox";
+      else if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list" || el.getAttribute("data-automation-id") === "searchBox" || /select__input|react-select/.test(el.id + " " + el.className) || isSearchPrompt(el)) kind = "combobox";
       else kind = "text";
       if (el.isContentEditable && tag !== "INPUT") kind = "textarea";
 
@@ -517,13 +526,26 @@
     return true;
   }
 
-  const OPTION_SEL = '[role="option"], [data-automation-id="promptOption"], [id*="-option-"], .select__option, .select2-results__option, li[data-value]';
+  const OPTION_SEL = '[role="option"], [data-automation-id="promptOption"], [data-automation-id="menuItem"], [id*="-option-"], .select__option, .select2-results__option, li[data-value]';
+  const LOADING_RE = /^(loading|searching|no (options|results|matches|items)|type to search|please wait)/i;
+  const NO_RESULTS_RE = /^(no (items|options|results|matches)( found)?\.?|no matches found)/i;
 
   function visibleOptions(scope) {
     const roots = scope ? [scope] : [document];
     let opts = [];
     for (const r of roots) opts = opts.concat(deepCollect(r.body || r, e => e.matches && e.matches(OPTION_SEL)));
-    return opts.filter(o => visible(o) && o.textContent.trim() && !o.closest('[aria-hidden="true"]'));
+    opts = opts.filter(o => visible(o) && o.textContent.trim() && !o.closest('[aria-hidden="true"]') && !isSelectedChip(o));
+    // One result row can match several selectors (li > div[role=option] > p). Keep the
+    // innermost element: its text is the clean label and a click on it bubbles to every wrapper.
+    return opts.filter(o => !opts.some(x => x !== o && o.contains(x)));
+  }
+  const sigOf = (opts) => opts.map(optionText).join("|");
+
+  // Workday renders already-chosen values as role="option" too ("..., press delete to clear").
+  // They are not search results and must never be picked from or counted.
+  function isSelectedChip(o) {
+    return !!(o.closest('[data-automation-id="selectedItemList"], [data-automation-id="selectedItem"]') ||
+      /press delete|remove|selected/i.test(o.getAttribute("aria-label") || "") && o.matches('[data-automation-id="selectedItem"]'));
   }
 
   function listboxFor(el) {
@@ -532,30 +554,349 @@
     return null;
   }
 
-  async function waitForOptions(el, timeout = 2500) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeout) {
-      const lb = listboxFor(el);
-      let opts = lb ? visibleOptions(lb) : [];
-      if (!opts.length) opts = visibleOptions();
-      const real = opts.filter(o => !/^(loading|searching|no (options|results|matches)|type to search)/i.test(o.textContent.trim()));
-      if (real.length) return real;
-      await sleep(120);
+  // Workday puts the clean label on data-automation-label; other sites use the text.
+  function optionText(o) {
+    const own = o.getAttribute("data-automation-label");
+    if (own && own.trim()) return own.trim();
+    const child = o.querySelector("[data-automation-label]");
+    if (child && child.getAttribute("data-automation-label").trim()) return child.getAttribute("data-automation-label").trim();
+    const inner = o.querySelector('[data-automation-id="promptLeafNode"], [data-automation-id="promptOption"]');
+    return (inner ? inner.textContent : o.textContent).replace(/\s+/g, " ").trim();
+  }
+
+  // Options that belong to this input's popup (they sit beside/below it), so an
+  // unrelated open list elsewhere on the page isn't picked up.
+  function nearInput(el, opts) {
+    const r = el.getBoundingClientRect();
+    const near = opts.filter(o => {
+      const b = o.getBoundingClientRect();
+      return b.right > r.left - 80 && b.left < r.right + 80 && b.top >= r.top - 800 && b.bottom <= r.bottom + 800;
+    });
+    return near.length ? near : opts;
+  }
+
+  function popupRows(el) {
+    const boxes = deepCollect(document.body, e => e.matches && e.matches('[data-automation-id="activeListContainer"], [role="listbox"], [class*="menu" i][class*="list" i], ul[role="presentation"]'))
+      .filter(b => visible(b) && !b.contains(el) && !b.matches('[data-automation-id="selectedItemList"]'));
+    for (const b of nearInput(el, boxes)) {
+      const rows = [...b.querySelectorAll('li, [role="option"], [data-automation-id*="prompt" i], div[id]')]
+        .filter(r => visible(r) && r.textContent.trim() && !r.querySelector('li, [role="option"]') && !NO_RESULTS_RE.test(r.textContent.trim()));
+      if (rows.length) return rows;
     }
     return [];
   }
 
-  function closeMenus(el) {
-    fire(el, "keydown", { key: "Escape", code: "Escape", keyCode: 27 });
+  function currentOptions(el) {
+    const lb = listboxFor(el);
+    let opts = lb ? visibleOptions(lb) : [];
+    if (!opts.length) opts = nearInput(el, visibleOptions());
+    if (!opts.length) opts = popupRows(el);
+    return opts.filter(o => !LOADING_RE.test(optionText(o)));
   }
 
-  function optionText(o) {
-    const lab = o.querySelector('[data-automation-id="promptLeafNode"], [data-automation-id="promptOption"]');
-    return (lab ? lab.textContent : o.textContent).replace(/\s+/g, " ").trim();
+  function noResultsShown() {
+    const boxes = deepCollect(document.body, e => e.matches && e.matches('[role="listbox"], [data-automation-id="activeListContainer"], [data-automation-id="noItems"], [class*="menu"], [class*="popup"], [class*="dropdown"]'));
+    return boxes.some(b => visible(b) && b.textContent.length < 200 && NO_RESULTS_RE.test(b.textContent.trim()));
+  }
+
+  // Wait until options appear AND stop changing (search results often load in two steps).
+  // `staleSig`: the list that was already showing before we typed. It doesn't count.
+  async function waitForOptions(el, timeout = 2500, staleSig = null) {
+    const t0 = Date.now();
+    let lastSig = "", same = 0;
+    while (Date.now() - t0 < timeout) {
+      const opts = currentOptions(el);
+      const sig = opts.length ? sigOf(opts) : "";
+      if (sig && sig !== staleSig) {
+        same = sig === lastSig ? same + 1 : 1;
+        lastSig = sig;
+        if (same >= 2) return opts;
+      } else {
+        lastSig = ""; same = 0;
+        // "No Items." can flash while a search is still running, so only believe it late.
+        if (!sig && Date.now() - t0 > Math.min(timeout - 500, 2500) && noResultsShown()) return [];
+      }
+      await sleep(100);
+    }
+    return lastSig ? currentOptions(el) : [];
+  }
+
+  // Close a results list left open by the previous pick, so it can't be mistaken for new results.
+  async function dismissPopup(el) {
+    if (!currentOptions(el).length) return;
+    closeMenus(el);
+    await sleep(200);
+    if (!currentOptions(el).length) return;
+    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) fire(document.body, t, { clientX: 2, clientY: 2 });
+    await sleep(200);
+    try { el.focus({ preventScroll: true }); } catch (_) {}
+  }
+
+  function pressKey(el, key, code, keyCode) {
+    const init = { key, code: code || key, keyCode: keyCode || 0, which: keyCode || 0 };
+    fire(el, "keydown", init); fire(el, "keypress", init); fire(el, "keyup", init);
+  }
+  const pressEnter = (el) => pressKey(el, "Enter", "Enter", 13);
+  const closeMenus = (el) => pressKey(el, "Escape", "Escape", 27);
+
+  // Type like a person. Prefer document.execCommand("insertText"): the browser
+  // dispatches real beforeinput/input events, which React-style widgets (Workday)
+  // always notice. Fall back to the native value setter plus synthetic events.
+  function insertViaEditing(el, text) {
+    try {
+      if (document.activeElement !== el && !(el.getRootNode() instanceof ShadowRoot)) return false;
+      return document.execCommand("insertText", false, text) && String(el.value).endsWith(text);
+    } catch (_) { return false; }
+  }
+
+  async function typeInto(el, text, delay = 45) {
+    try { el.focus({ preventScroll: true }); } catch (_) {}
+    fire(el, "focus"); fire(el, "focusin");
+    try { el.select(); } catch (_) {}
+    if (el.value) {
+      if (!(document.activeElement === el && document.execCommand("delete"))) { nativeSet(el, ""); fire(el, "input", { inputType: "deleteContentBackward" }); }
+    }
+    let cur = "";
+    for (const ch of String(text)) {
+      cur += ch;
+      fire(el, "keydown", { key: ch }); fire(el, "keypress", { key: ch });
+      if (!insertViaEditing(el, ch)) {
+        nativeSet(el, cur);
+        fire(el, "input", { inputType: "insertText", data: ch });
+      }
+      fire(el, "keyup", { key: ch });
+      if (delay) await sleep(delay);
+    }
+    if (el.value !== String(text)) { nativeSet(el, String(text)); fire(el, "input", { inputType: "insertText", data: String(text) }); }
+  }
+
+  function clearInput(el) {
+    if (!el.value) return;
+    try { el.focus({ preventScroll: true }); el.select(); if (document.execCommand("delete") && !el.value) return; } catch (_) {}
+    nativeSet(el, "");
+    fire(el, "input", { inputType: "deleteContentBackward" });
+    fire(el, "change");
+  }
+
+  // The box that holds this field's search input and its selected "chips".
+  function fieldBox(el) {
+    const ff = el.closest('[data-automation-id^="formField"]');
+    if (ff) return ff;
+    let n = el;
+    for (let i = 0; i < 3 && parentOf(n) && parentOf(n).nodeType === 1; i++) n = parentOf(n);
+    return n;
+  }
+
+  const CHIP_SEL = '[data-automation-id="selectedItem"], [data-automation-id*="selectedItem" i], [class*="multi-value__label"], [class*="chip" i], [class*="pill" i], [data-automation-id="selectedItemList"] li';
+  function chipTexts(el) {
+    const els = [...fieldBox(el).querySelectorAll(CHIP_SEL)].filter(e => visible(e) && !e.matches('ul, ol, [data-automation-id="selectedItemList"]'));
+    return [...new Set(els.map(e => norm(e.getAttribute("data-automation-label") || e.textContent)).filter(Boolean))];
+  }
+
+  function rowChecked(optEl) {
+    const row = optEl.closest('[role="option"], li, [data-automation-id="menuItem"]') || optEl;
+    const al = (row.getAttribute("aria-label") || "").trim();
+    // Workday: aria-label ends "… checked" / "… not checked". aria-selected there only means "highlighted".
+    if (/\bchecked$/i.test(al)) return !/\b(not|un)\s*checked$/i.test(al);
+    if (row.getAttribute("aria-checked") === "true") return true;
+    const box = row.querySelector('input[type="checkbox"], [role="checkbox"]');
+    if (box) return !!(box.checked || box.getAttribute("aria-checked") === "true");
+    return !row.querySelector('[data-automation-id="checkbox"]') && row.getAttribute("aria-selected") === "true";
+  }
+
+  // needChip: the field shows picked values as chips (Workday), so only a new chip
+  // (or a ticked row) proves the pick worked. Otherwise fall back to looser signs.
+  function chipLabels(el) {
+    const els = [...fieldBox(el).querySelectorAll(CHIP_SEL)].filter(e => visible(e) && !e.matches('ul, ol, [data-automation-id="selectedItemList"]'));
+    const label = (e) => { const c = e.matches("[data-automation-label]") ? e : e.querySelector("[data-automation-label]"); return (c ? c.getAttribute("data-automation-label") : e.textContent).replace(/\s+/g, " ").trim(); };
+    return [...new Set(els.map(label).filter(Boolean))];
+  }
+
+  function tookEffect(el, optEl, before, needChip) {
+    if (chipTexts(el).length > before.chips) return true;
+    if (rowChecked(optEl) && !before.checked) return true;
+    if (needChip) return false;
+    if (!optEl.isConnected || !visible(optEl)) return true;        // popup closed
+    return el.value !== before.val;                                // typed text was cleared/replaced
+  }
+
+  async function settled(el, optEl, before, needChip, ms = 1200) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      if (tookEffect(el, optEl, before, needChip)) return true;
+      await sleep(100);
+    }
+    return false;
+  }
+
+  // Where a person would click in a result row: the label first, then the row, then its checkbox.
+  function clickTargets(optEl) {
+    const row = optEl.closest('[role="option"]') || optEl;
+    const leaf = optEl.closest('[data-automation-id="promptLeafNode"]') || optEl.querySelector('[data-automation-id="promptLeafNode"]');
+    const box = row.querySelector('input[type="checkbox"], [role="checkbox"], [data-automation-id="checkbox"], [data-automation-id="checkboxPanel"]');
+    return [...new Set([optEl, leaf, row, box].filter(Boolean))];
+  }
+
+  async function pickOption(el, optEl, { needChip = false, trace = [] } = {}) {
+    const before = { chips: chipTexts(el).length, val: el.value, checked: rowChecked(optEl) };
+    for (const t of clickTargets(optEl)) {
+      if (!t.isConnected) break;
+      realClick(t);
+      if (await settled(el, optEl, before, needChip)) { trace.push("click took"); return true; }
+      trace.push(`click on <${t.tagName.toLowerCase()} ${t.getAttribute("data-automation-id") || t.getAttribute("role") || ""}> did nothing`);
+    }
+    // Keyboard route, like a person would: arrow down to the row, then Enter.
+    for (const t of ["pointerover", "mouseover", "mouseenter", "mousemove"]) fire(optEl, t);
+    const all = currentOptions(el), idx = all.indexOf(optEl);
+    try { el.focus({ preventScroll: true }); } catch (_) {}
+    if (idx >= 0) for (let k = 0; k <= idx; k++) { pressKey(el, "ArrowDown", "ArrowDown", 40); await sleep(60); }
+    pressEnter(el);
+    const ok = await settled(el, optEl, before, needChip);
+    trace.push(ok ? "arrow+Enter took" : "arrow+Enter did nothing");
+    return ok;
+  }
+
+  function searchTerms(...vals) {
+    const out = [];
+    for (const v of vals) {
+      const s = String(v || "").trim();
+      if (!s) continue;
+      const w = s.split(/\s+/);
+      out.push(s);
+      if (w.length > 2) out.push(w.slice(0, 2).join(" "));
+      if (w.length > 1) out.push(w[0]);
+    }
+    return [...new Set(out)].filter(x => x.length >= 2).slice(0, 4);
+  }
+
+  /**
+   * Type a search term, wait for the site's results, click the best match.
+   * Tries the full text, then shorter versions. Presses Enter if results don't
+   * appear by themselves (Workday searches on Enter).
+   */
+  // Structure-only snapshot of the field and any open popup, for troubleshooting.
+  // Keeps tag + a few attributes + short text; never copies typed values.
+  const KEEP_ATTR = /^(id|class|role|type|placeholder|data-automation-id|data-automation-label|data-uxi-widget-type|aria-[a-z]+|tabindex|disabled|hidden)$/;
+  function dumpNode(n, depth, budget) {
+    if (budget.left <= 0) return "";
+    if (n.nodeType === 3) { const t = n.textContent.replace(/\s+/g, " ").trim(); return t ? t.slice(0, 40) : ""; }
+    if (n.nodeType !== 1 || /^(SCRIPT|STYLE|SVG|PATH|NOSCRIPT)$/i.test(n.tagName)) return "";
+    const attrs = [...n.attributes].filter(a => KEEP_ATTR.test(a.name)).map(a => `${a.name}="${a.value.slice(0, 50)}"`).join(" ");
+    let out = `<${n.tagName.toLowerCase()}${attrs ? " " + attrs : ""}>`;
+    budget.left -= out.length;
+    if (depth > 0) for (const c of n.childNodes) { out += dumpNode(c, depth - 1, budget); if (budget.left <= 0) { out += "…"; break; } }
+    return out + `</${n.tagName.toLowerCase()}>`;
+  }
+
+  const POPUP_SEL = '[data-automation-id="activeListContainer"], [role="listbox"], [data-automation-id="noItems"], [data-automation-id*="popup" i], [data-uxi-widget-type*="popup" i], [data-automation-id*="promptList" i], [role="dialog"], [role="menu"]';
+  function openPopups(el) {
+    const ff = el.closest('[data-automation-id^="formField"]') || fieldBox(el);
+    let pops = deepCollect(document.body, e => e.matches && e.matches(POPUP_SEL))
+      .filter(b => visible(b) && !ff.contains(b) && !b.contains(el) && !b.closest('[data-jaf-ignore]') && !b.matches('[data-automation-id="selectedItemList"]'));
+    pops = pops.filter(p => !pops.some(x => x !== p && x.contains(p)));     // outermost only
+    return nearInput(el, pops);
+  }
+
+  function domSnapshot(el, why) {
+    const budget = { left: 6500 };
+    const ff = el.closest('[data-automation-id^="formField"]') || fieldBox(el);
+    const field = dumpNode(ff, 7, { left: 1800 });
+    const pops = openPopups(el);
+    return `${why} | inputValue="${String(el.value).slice(0, 30)}" focused=${document.activeElement === el} script=v${VER}` +
+      ` | FIELD ${field} | POPUPS(${pops.length}) ${pops.slice(0, 2).map(p => dumpNode(p, 9, budget)).join(" ; ") || "(none visible)"}`;
+  }
+  let lastDump = "";
+
+  function popupSnapshot(el) {
+    return openPopups(el).map(b => b.textContent.replace(/\s+/g, " ").trim().slice(0, 60)).filter(Boolean).slice(0, 2);
+  }
+
+  // Remembers, per field, that the site only searches when Enter is pressed.
+  const enterFirst = new WeakMap();
+
+  // Type one search term and return the fresh results (pressing Enter if the site needs it).
+  async function searchFor(el, term, trace) {
+    await dismissPopup(el);
+    const stale = sigOf(currentOptions(el)) || null;
+    await typeInto(el, term);
+    let opts = await waitForOptions(el, enterFirst.get(el) ? 700 : 2500, stale);
+    trace.push(`typed "${term}" -> ${opts.length} results`);
+    if (!opts.length) {
+      pressEnter(el);                                   // some sites only search on Enter
+      opts = await waitForOptions(el, 6000, stale);
+      trace.push(`Enter -> ${opts.length} results`);
+      if (opts.length) enterFirst.set(el, true);
+    }
+    return opts;
+  }
+
+  async function typeAndPick(el, value, key, opt) {
+    const terms = searchTerms(opt.search, value);
+    let seen = 0, sample = [], popup = [];
+    for (let t = 0; t < terms.length; t++) {
+      const trace = [];
+      const chips0 = chipTexts(el);
+      const opts = await searchFor(el, terms[t], trace);
+      // Some sites add the value straight away when Enter finds exactly one match.
+      const fresh = chipTexts(el).filter(c => !chips0.includes(c));
+      if (fresh.length) return { status: "picked", label: fresh[0], seen, sample };
+      if (!opts.length) {
+        popup = popupSnapshot(el);
+        if (!lastDump) lastDump = domSnapshot(el, `no results (${trace.join(", ")})`);
+        continue;
+      }
+      const labels = opts.map(optionText);
+      seen = Math.max(seen, labels.length);
+      if (!sample.length) sample = labels.slice(0, 5);
+      const i = M.bestOption(labels, value, key, opt);
+      if (i >= 0 && await pickOption(el, opts[i], { trace })) return { status: "picked", label: labels[i], seen, sample };
+      if (!lastDump) lastDump = domSnapshot(el, (i >= 0 ? `results found, selecting "${labels[i]}" did not take` : `results found (${labels.slice(0, 4).join("; ")}) but none matched "${value}"`) + ` (${trace.join(", ")})`);
+    }
+    return { status: "none", seen, sample, popup };
+  }
+
+  // One skill: search under each name it goes by, score every result, and pick only an
+  // entry that is the same skill (see skillScore). A sure match is taken at once; a
+  // weaker one only if no later search finds better.
+  async function pickSkill(el, plan, needChip) {
+    let seen = 0, sample = [], popup = [], best = null, lastTerm = null;
+    const take = async (o, label, trace) => {
+      if (rowChecked(o)) return { status: "picked", label, seen, sample, already: true };
+      if (await pickOption(el, o, { needChip, trace })) return { status: "picked", label, seen, sample };
+      if (!lastDump) lastDump = domSnapshot(el, `results found, selecting "${label}" did not take (${trace.join(", ")})`);
+      return null;
+    };
+    for (const term of plan.terms) {
+      const trace = [];
+      const chips0 = chipLabels(el);
+      const opts = await searchFor(el, term, trace);
+      lastTerm = term;
+      const fresh = chipLabels(el).filter(c => !chips0.includes(c));
+      if (fresh.length) return { status: "picked", label: fresh[0], seen, sample };
+      if (!opts.length) {
+        popup = popupSnapshot(el);
+        if (!lastDump) lastDump = domSnapshot(el, `no results (${trace.join(", ")})`);
+        continue;
+      }
+      const labels = opts.map(optionText);
+      seen = Math.max(seen, labels.length);
+      if (!sample.length) sample = labels.slice(0, 5);
+      const m = M.skillOption(labels, plan);
+      if (m.i >= 0 && m.score >= 90) { const r = await take(opts[m.i], labels[m.i], trace); if (r) return r; }
+      else if (m.i >= 0 && (!best || m.score > best.score)) best = { term, label: labels[m.i], score: m.score };
+    }
+    if (best) {
+      const trace = [];
+      let opts = lastTerm === best.term ? currentOptions(el) : [];
+      if (!opts.some(o => optionText(o) === best.label)) opts = await searchFor(el, best.term, trace);
+      const o = opts.find(x => optionText(x) === best.label);
+      if (o) { const r = await take(o, best.label, trace); if (r) return r; }
+    }
+    return { status: "none", seen, sample, popup };
   }
 
   async function chooseFromOpenList(el, value, key, opt) {
-    const opts = await waitForOptions(el);
+    const opts = await waitForOptions(el, 3000);
     if (!opts.length) return false;
     const i = M.bestOption(opts.map(optionText), value, key, opt);
     if (i < 0) return false;
@@ -578,22 +919,65 @@
     return ok;
   }
 
-  async function setCombobox(el, value, key, opt) {
-    const term = String(opt.search || value);
+  // Search-and-pick field with one answer (school, field of study, location…).
+  async function setCombobox(el, value, key, opt, note) {
     realClick(el);
-    setText(el, term, { blur: false });
-    if (el.getAttribute("data-automation-id") === "searchBox") fire(el, "keydown", { key: "Enter", code: "Enter", keyCode: 13 });
-    await sleep(300);
-    let ok = await chooseFromOpenList(el, value, key, opt);
-    if (!ok && term !== String(value)) { setText(el, String(value), { blur: false }); await sleep(300); ok = await chooseFromOpenList(el, value, key, opt); }
-    if (!ok) {
-      // Free-text combos (e.g. Lever location) keep the typed text; others get cleared.
-      if (!/^(location|city|edu\.school|edu\.major|job\.location)$/.test(key)) { closeMenus(el); }
-      fire(el, "blur");
-      return el.value && norm(el.value) === norm(term) ? "typed" : false;
+    const r = await typeAndPick(el, value, key, opt);
+    if (r.status === "picked") { fire(el, "blur"); return true; }
+    note.dom = lastDump;
+    note.text = r.seen ? `no match among ${r.seen} options (e.g. ${r.sample.slice(0, 3).join("; ")})` : `site showed no options` + (r.popup && r.popup.length ? ` (popup said: ${r.popup.join(" / ")})` : " (no popup found)");
+    if (opt.freeText) {
+      // Free-text fields (e.g. a city box) keep what was typed.
+      const full = String(opt.search || value);
+      if (el.value !== full) await typeInto(el, full);
+      closeMenus(el); fire(el, "blur");
+      return el.value ? "typed" : false;
     }
-    fire(el, "blur");
-    return true;
+    clearInput(el); closeMenus(el); fire(el, "blur");
+    return false;
+  }
+
+  // Search-and-pick field that takes several answers (Workday "Skills"): one at a time.
+  async function setMulti(el, rawValue, key, opt, note, summary) {
+    const seenSkill = new Set();
+    const skills = String(rawValue).split(/[,;\n|]+/).map(x => x.trim()).filter(x => {
+      const k = norm(x); if (!k || seenSkill.has(k)) return false; seenSkill.add(k); return true;
+    });
+    const MAX = 30;
+    const list = skills.slice(0, MAX);
+    const have = chipLabels(el);
+    const added = [], already = [], notFound = [], picks = [];
+    const needChip = !!el.closest("[data-automation-id]");
+    let firstWhy = "";
+    realClick(el);
+    let streak = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (streak >= 3 && !added.length) { notFound.push(...list.slice(i)); break; }   // nothing is working: stop, don't hammer the page
+      const sk = list[i], plan = M.skillPlan(sk);
+      if (have.some(h => M.skillScore(h, plan) >= 80)) { already.push(sk); continue; }
+      progress(`Adding skills… ${i + 1} of ${list.length}`);
+      const r = await pickSkill(el, plan, needChip);
+      if (r.status === "picked") {
+        streak = 0; have.push(r.label);
+        if (r.already) already.push(sk); else { added.push(sk); if (norm(r.label) !== norm(sk)) picks.push(`${sk} -> ${r.label}`); }
+      }
+      else {
+        notFound.push(sk); streak++; clearInput(el); closeMenus(el);
+        if (!firstWhy) firstWhy = r.seen ? `"${sk}": nothing in the ${r.seen} results was the same skill (e.g. ${r.sample.slice(0, 3).join("; ")})` : `"${sk}": site showed no options` + (r.popup && r.popup.length ? ` (popup said: ${r.popup.join(" / ")})` : " (no popup found)");
+      }
+      await sleep(350);
+    }
+    clearInput(el); await dismissPopup(el); fire(el, "blur");
+    summary.notFound.push(...notFound);
+    if (notFound.length) note.dom = lastDump;
+    const parts = [`added ${added.length} of ${list.length}`];
+    if (picks.length) parts.push(`matched as: ${picks.join("; ")}`);
+    if (already.length) parts.push(`${already.length} already there`);
+    if (notFound.length) parts.push(`not in site's list: ${notFound.join(", ")}`);
+    if (skills.length > MAX) parts.push(`stopped at ${MAX}`);
+    if (firstWhy) parts.push(`first miss: ${firstWhy}`);
+    note.text = parts.join("; ");
+    return added.length > 0 || already.length > 0;
   }
 
   function dataUrlToFile(f) {
@@ -629,6 +1013,7 @@
       case "listbox": { const t = norm(el.textContent || el.value); return !!t && !M.isPlaceholderOpt(t) && !/select one/.test(t); }
       case "combobox": {
         if (String(el.value || "").trim()) return true;
+        if (chipTexts(el).length) return true;
         const box = el.closest('[class*="container"], [data-automation-id="multiselectInputContainer"], [class*="select"]') || parentOf(el);
         return !!(box && [...box.querySelectorAll('[class*="single-value"], [class*="singleValue"], [data-automation-id="selectedItem"], [class*="multi-value"]')].some(x => visible(x) && x.textContent.trim()));
       }
@@ -648,15 +1033,28 @@
     for (const t of targets) if (t && t.classList) { t.classList.remove("jaf-filled", "jaf-attention"); t.classList.add(cls); }
   }
 
+  const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function progress(text) {
+    let d = document.querySelector(".jaf-toast");
+    if (!d) {
+      d = document.createElement("div");
+      d.className = "jaf-toast";
+      d.setAttribute("data-jaf-ignore", "");
+      document.documentElement.appendChild(d);
+    }
+    d.innerHTML = `<b>Job Autofill</b> · ${esc(text)}`;
+  }
+
   function toast(summary) {
     if (window.top !== window && summary.filled === 0 && summary.needsAttention === 0) return;
     const old = document.querySelector(".jaf-toast"); if (old) old.remove();
     const d = document.createElement("div");
     d.className = "jaf-toast";
     d.setAttribute("data-jaf-ignore", "");
-    const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     d.innerHTML = `<b>Job Autofill</b>${summary.profileName ? ` (${esc(summary.profileName)})` : ""} · ${summary.filled} filled` + (summary.skipped ? ` · ${summary.skipped} already set` : "") +
       (summary.needsAttention ? ` · <span class="jaf-t-attn">${summary.needsAttention} need you</span>` : "") +
+      (summary.notFound.length ? `<div class="jaf-t-sub">Not in this site's list: ${esc(summary.notFound.slice(0, 6).join(", "))}${summary.notFound.length > 6 ? "…" : ""}</div>` : "") +
       `<div class="jaf-t-sub">Review everything, then submit yourself.</div>`;
     d.addEventListener("click", () => d.remove());
     document.documentElement.appendChild(d);
@@ -666,6 +1064,27 @@
   // ---------------------------------------------------------------------------
   // Main
   // ---------------------------------------------------------------------------
+  // Search boxes where leaving the typed text is acceptable when nothing matches.
+  const FREE_TEXT_KEYS = new Set(["location", "city", "edu.school", "edu.major", "job.location"]);
+
+  // The page saves its own report as it goes, so a long fill still leaves one behind
+  // even if the popup closed or the background worker went to sleep.
+  const reportLines = (summary) => {
+    const out = [];
+    for (const d of summary.details) {
+      out.push(`${d.status}\t${d.kind}\t${d.key || "-"}\t${d.label}${d.note ? "\t" + d.note : ""}`);
+      if (d.dom) out.push(`   DOM: ${d.dom}`);
+    }
+    return out;
+  };
+  async function saveReport(summary, done) {
+    try {
+      if (!summary.details.length) return;
+      const head = `Job Autofill report · ${summary.site} · v${VER} · ${new Date().toLocaleString()}${done ? "" : " · STILL RUNNING"}`;
+      await chrome.storage.local.set({ lastReport: `${head}\nstatus\tkind\tkey\tlabel\tnote\n${reportLines(summary).join("\n")}` });
+    } catch (_) {}
+  }
+
   let running = false;
 
   async function run(opts = {}) {
@@ -683,7 +1102,7 @@
 
       const fields = collectFields();
       const fileFields = fields.filter(f => f.kind === "file");
-      const summary = { site: adapter.name, profileName: store.profileName || null, filled: 0, skipped: 0, needsAttention: 0, details: [] };
+      const summary = { site: adapter.name, profileName: store.profileName || null, filled: 0, skipped: 0, needsAttention: 0, notFound: [], details: [] };
 
       for (const f of fields) {
         let key = null, value = null, extra = {};
@@ -694,7 +1113,9 @@
           if (key === "resumeFile?") key = fileFields.length === 1 ? "resumeFile" : null;
         }
 
-        const record = (status) => summary.details.push({ kind: f.kind, label: f.label.slice(0, 80), section: f.section, key, value: typeof value === "string" ? value.slice(0, 40) : value, status });
+        const note = { text: "", dom: "" };
+        lastDump = "";
+        const record = (status) => summary.details.push({ kind: f.kind, label: f.label.slice(0, 80), section: f.section, key, value: typeof value === "string" ? value.slice(0, 40) : value, status, note: note.text || undefined, dom: note.dom || undefined });
 
         if (!key || key === "__skip" || key === "__consent" || key === "__eeo") {
           if (f.required && !hasValue(f)) { mark(f, "jaf-attention", settings); summary.needsAttention++; record("attention"); }
@@ -721,7 +1142,8 @@
           else record("no-value");
           continue;
         }
-        if (hasValue(f) && !settings.overwrite) { summary.skipped++; record("kept"); continue; }
+        const multi = key === "skills" && f.kind === "combobox";   // adds missing skills even if some exist
+        if (!multi && hasValue(f) && !settings.overwrite) { summary.skipped++; record("kept"); continue; }
 
         // A Yes/No question whose answer we only know as a fact (e.g. "Have you
         // completed a Bachelor's?" vs degree = "Bachelor of Science") — leave it to you.
@@ -733,7 +1155,8 @@
             continue;
           }
         }
-        const opt = { country: profile.country, alt: extra.alt || [], part: extra.part, search: extra.search };
+        const opt = { country: profile.country, alt: extra.alt || [], part: extra.part, search: extra.search,
+          freeText: FREE_TEXT_KEYS.has(key) && adapter.name !== "Workday" };
         let ok = false;
         try {
           switch (f.kind) {
@@ -747,23 +1170,27 @@
               break;
             }
             case "listbox": ok = await setListbox(f.el, String(value), key, opt); break;
-            case "combobox": ok = await setCombobox(f.el, String(value), key, opt); break;
+            case "combobox": ok = multi ? await setMulti(f.el, String(value), key, opt, note, summary) : await setCombobox(f.el, String(value), key, opt, note); break;
           }
         } catch (e) { console.warn("[Job Autofill] fill", key, e); ok = false; }
 
         if (ok) { mark(f, "jaf-filled", settings); summary.filled++; record(ok === "typed" ? "typed" : "filled"); }
         else { mark(f, "jaf-attention", settings); summary.needsAttention++; record("failed"); }
+        if (f.kind === "combobox") saveReport(summary, false);
         await sleep(f.kind === "listbox" || f.kind === "combobox" ? 150 : 15);
       }
 
       if (fields.length) toast(summary);
+      summary.report = reportLines(summary);
+      summary.version = VER;
+      await saveReport(summary, true);
       return summary;
     } finally {
       running = false;
     }
   }
 
-  window.__jobAutofill = { run, _collect: collectFields, _keyFor: keyFor };
+  window.__jobAutofill = { version: VER, run, _collect: collectFields, _keyFor: keyFor };
 
   // Listen for messages (popup → background → tab) too, for robustness.
   try {

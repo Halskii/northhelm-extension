@@ -1,4 +1,15 @@
 // Job Autofill — options page: manage profiles, edit the selected one, global settings.
+// Show any error on the page instead of failing silently.
+function showError(msg) {
+  const box = document.getElementById("err-banner");
+  if (!box) return;
+  document.getElementById("err-text").textContent = String(msg || "Unknown error");
+  box.hidden = false;
+}
+window.addEventListener("error", (e) => showError(e.message));
+window.addEventListener("unhandledrejection", (e) => showError((e.reason && e.reason.message) || e.reason));
+document.getElementById("err-close")?.addEventListener("click", () => { document.getElementById("err-banner").hidden = true; });
+
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -93,6 +104,8 @@ function openDialog({ title, okText, name = "", showNew = false, showName = true
     if (showName) { $("#dlg-name").focus(); $("#dlg-name").select(); }
   });
 }
+// Cancel buttons are type="button" so pressing Enter submits (Create/Save/Delete) instead of cancelling.
+for (const b of $$(".dlg-cancel")) b.addEventListener("click", () => b.closest("dialog").close("cancel"));
 $("#dlg-src").addEventListener("change", () => { document.querySelector('input[name="start"][value="copy"]').checked = true; });
 
 $("#p-new").addEventListener("click", async () => {
@@ -101,6 +114,7 @@ $("#p-new").addEventListener("click", async () => {
   const src = $("#dlg-src");
   src.innerHTML = "";
   for (const p of items) { const o = document.createElement("option"); o.value = p.id; o.textContent = p.name; src.appendChild(o); }
+  if (!items.length) { await init(); return; }
   src.value = items[0].id; // the first profile, by default
   document.querySelector('input[name="start"][value="copy"]').checked = true;
   $("#dlg-files").checked = false;
@@ -109,11 +123,7 @@ $("#p-new").addEventListener("click", async () => {
 
   let id;
   if (r.start === "blank") {
-    const blank = clone(window.JAF_DEFAULT_PROFILE);
-    for (const k of Object.keys(blank)) if (typeof blank[k] === "string") blank[k] = "";
-    blank.phoneCountryCode = "+1"; blank.phoneType = "Mobile"; blank.country = "United States";
-    blank.workHistory = []; blank.education = []; blank.customAnswers = []; blank.eeo = {};
-    id = await ST.create(r.name, blank);
+    id = await ST.create(r.name, clone(window.JAF_DEFAULT_PROFILE));
   } else {
     id = await ST.duplicate(r.src, r.name, { files: r.files });
   }
@@ -326,7 +336,8 @@ window.JAF_OPTIONS = {
 };
 
 // ---------- init ----------
-(async function init() {
+let bound = false;
+async function init() {
   let { profileOrder, activeProfileId, settings: s } = await ST.ensure();
   settings = { ...window.JAF_DEFAULT_SETTINGS, ...(s || {}) };
   if (!profileOrder.length) {
@@ -335,6 +346,7 @@ window.JAF_OPTIONS = {
     await ST.setActive(activeProfileId);
     await chrome.storage.local.set({ settings });
   }
-  bindSimple();
+  if (!bound) { bindSimple(); bound = true; }
   await switchTo(activeProfileId);
-})();
+}
+init().catch((e) => showError("Couldn't load your profiles: " + (e && e.message || e)));
